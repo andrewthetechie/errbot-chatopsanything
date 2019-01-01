@@ -1,0 +1,12 @@
+[Core]
+Name = ChatOpsAnything
+Module = chatops-anything
+
+[Documentation]
+Description = This is a plugin that chatops enables a directory of exectables
+
+[Python]
+Version = 3
+
+[Errbot]
+min = 5.2.0
