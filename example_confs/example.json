@@ -1,0 +1,15 @@
+[{
+	"bin_path": "/path/to/executable",
+	"name": "Test Command",
+	"help": "Help test",
+	"env_vars": {
+		"key": "value",
+		"key2": "value2"
+	},
+	"timeout": 60
+}, {
+	"url": "https://files.internet.co/file.sh",
+	"name": "file.sh",
+	"help": "Downloaded from web",
+	"timeout": 15
+}]

@@ -1,0 +1,11 @@
+- bin_path: /path/to/executable # Path to the binary you're providng info for
+  name: "Test Command" # Optional. name gets turned into the bot's command. In this case, the command would end up being !test command. If left blank, name will be the name of the executable
+  help: "Help test"  # Can be left blank or ommitted. If ommitted, we'll run -h on the bin_path to try to get help
+  env_vars: # can set extra environment variables to be injected when we run the executable
+    key: value
+    key2: value2
+  timeout: 60 # set a custom timeout for this command in seconds
+- url: https://files.internet.co/file.sh # Instead of binpath, you can provide a http/s url. The plugin downloads the file on activation
+  name: file.sh  # url entries must have a filename
+  help: "Downloaded from web"
+  timeout: 15
