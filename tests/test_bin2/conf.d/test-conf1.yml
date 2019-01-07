@@ -1,0 +1,9 @@
+- name: testls
+  bin_path: /bin/ls
+  help: "Help text"
+  timeout: 60
+  env_vars:
+    var_one: 1
+    var_two: 2
+- name: testdl
+  url: "https://fakeurl.fakesite.com/fakefile"

@@ -1,0 +1,15 @@
+[{
+	"bin_path": "/bin/ls",
+	"name": "testlsjson",
+	"env_vars": {
+		"key": "value",
+		"key2": "value2"
+	},
+	"timeout": 91
+},
+{
+	"name": "testoverwrite",
+	"bin_path": "/bin/dd",
+	"help": "This is help from the json file"
+}
+]

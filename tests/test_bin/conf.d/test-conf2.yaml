@@ -1,0 +1,4 @@
+- bin_path: /bin/file
+  timeout: 11
+- name: testoverwrite
+  bin_path: /bin/dd

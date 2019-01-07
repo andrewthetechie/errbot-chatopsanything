@@ -61,10 +61,12 @@ class ChatOpsAnything(BotPlugin):
         self.BIN_PATH = Path(self.config['BIN_PATH'])
         executables = self._get_all_execs_in_path(self.BIN_PATH)
         self.log.info(f"Found executables at {self.BIN_PATH}")
+        self.log.debug(f"{self.config['EXCLUSIONS']} will be excluded from BIN_PATH")
         for executable in executables:
             name = executable.name.lower()
-            if name not in exec_configs:
-                self.log.debug(f"{executable} has no config file, adding it now")
+            # add any executables we dont have configs for that aren't in our EXCLUSIONS list
+            if name not in exec_configs and name not in self.config['EXCLUSIONS']:
+                self.log.debug(f"{executable} has no config file and is not excluded, adding it now")
                 exec_configs[name] = dict()
                 exec_configs[name]['bin_path'] = executable
                 exec_configs[name]['help'] = self._get_help(executable)
@@ -75,6 +77,8 @@ class ChatOpsAnything(BotPlugin):
         # commands is a list of our
         commands = list()
         for command in exec_configs.keys():
+            if 'help' not in exec_configs[command]:
+                exec_configs[command]['help'] = self._get_help(exec_configs[command]['bin_path'])
             # create a new command for the bot
             self.log.debug(f"Creating new command for {command}")
             commands.append(Command(lambda plugin, msg, args: self._run_command(msg,
@@ -270,42 +274,50 @@ class ChatOpsAnything(BotPlugin):
         # step through all of our config objects. Collapse them down into a dict where key = binpath and value is a
         # dict of all our other values from the config
         # if binpath is a url, we stop and do the download here and replace the url with our temporary binpath
-        for loaded_config in loaded_configs:
-            # quick validation here
-            if 'bin_path' not in loaded_config:
-                if 'url' not in loaded_config:
-                    self.log.error(f"Config is invalid. No bin_path or url. Discarding {loaded_config}")
-                    continue
-                else:
-                    if 'name' not in loaded_config:
-                        self.log.error(f"Config provides a url {loaded_config['url']} and no name. "
-                                       f"Skipping this config")
+        try:
+            for loaded_config in loaded_configs:
+                # quick validation here
+                if 'bin_path' not in loaded_config:
+                    if 'url' not in loaded_config:
+                        self.log.error(f"Config is invalid. No bin_path or url. Discarding {loaded_config}")
                         continue
-
-                    url = urlparse(loaded_config['url'].strip())
-                    if url.scheme in ['http', 'https']:
-                        try:
-                            loaded_config['bin_path'] = self._download_executable(loaded_config['url'],
-                                                                                  loaded_config['name'])
-                        except ValidationException as exception:
-                            self.log.error(f"Error downloading executable at {loaded_config['url']}. {exception}")
-                            continue
                     else:
-                        self.log.error(f"Config is invalid. URL is not http/s. Discarding {loaded_config}")
-            bin_path = Path(loaded_config['bin_path'])
-            name = loaded_config.pop('name', None)
-            if name is None:
-                name = bin_path.name
-            # lower case all the names to canonicalize them
-            name = name.lower().strip().replace(" ", "_")
-            if name not in config_dict:
-                self.log.debug(f"Adding {name} to our config as a top level key")
-                config_dict[name] = loaded_config
-            else:
-                self.log.info(f"{name} already defined. Keys might get overwritten. "
-                              f"Check your configs for duplicates")
-                # merge our configs, overwriting with this new one
-                config_dict[name] = merge_two_dicts(config_dict[name], loaded_config)
+                        if 'name' not in loaded_config:
+                            self.log.error(f"Config provides a url {loaded_config['url']} and no name. "
+                                           f"Skipping this config")
+                            continue
+
+                        url = urlparse(loaded_config['url'].strip())
+                        if url.scheme in ['http', 'https']:
+                            try:
+                                loaded_config['bin_path'] = self._download_executable(loaded_config['url'],
+                                                                                      loaded_config['name'])
+                            except ValidationException as exception:
+                                self.log.error(f"Error downloading executable at {loaded_config['url']}. {exception}")
+                                continue
+                            except requests.exceptions.HTTPError as exception:
+                                self.log.error(f"Error while downloading executable at {loaded_config['url']}. "
+                                               f"{exception}")
+                                continue
+                        else:
+                            self.log.error(f"Config is invalid. URL is not http/s. Discarding {loaded_config}")
+                bin_path = Path(loaded_config['bin_path'])
+                name = loaded_config.pop('name', None)
+                if name is None:
+                    name = bin_path.name
+                # lower case all the names to canonicalize them
+                name = name.lower().strip().replace(" ", "_")
+                if name not in config_dict:
+                    self.log.debug(f"Adding {name} to our config as a top level key")
+                    config_dict[name] = loaded_config
+                else:
+                    self.log.info(f"{name} already defined. Keys might get overwritten. "
+                                  f"Check your configs for duplicates")
+                    # merge our configs, overwriting with this new one
+                    config_dict[name] = merge_two_dicts(config_dict[name], loaded_config)
+        except TypeError as error:
+            self.log.error(f"Got a typeerror {error}. Unable to iterate. Are there no loaded configs?")
+            config_dict = dict()
 
         return config_dict
 
@@ -320,6 +332,7 @@ class ChatOpsAnything(BotPlugin):
             path (str): Path where we've stored the file
         """
         with requests.get(url, allow_redirects=True, stream=True) as response:
+            response.raise_for_status()
             content_length = response.headers.get('content-length', None)
             if content_length and float(content_length) > self.config['MAX_DOWNLOAD_SIZE']:
                 self.log.error(f"File at {url} is {content_length} in size, greater than MAX_DOWNLOAD_SIZE")
@@ -344,12 +357,21 @@ class ChatOpsAnything(BotPlugin):
         Returns:
             List[Dict] - list of config objects from the yaml file
         """
+        self.log.debug(f"Opening {file} to read as yaml config")
         with open(file, 'r') as stream:
             try:
-                return yaml.load(stream)
+                read_data = yaml.load(stream)
             except yaml.YAMLError as exc:
                 self.log.error(f"{file} is not a valid yaml config file {str(exc)}")
-                return []
+                return list()
+
+        self.log.debug(f"Read in {file} to {read_data}")
+        if type(read_data) != list:
+            self.log.error(f"{file} is not a valid config file. Please check the config examples. Your file should "
+                           f"contain a list of dictionaries")
+            return list()
+
+        return read_data
 
     def _read_json_config(self, file: Path) -> List[Dict]:
         """
@@ -360,24 +382,35 @@ class ChatOpsAnything(BotPlugin):
         Returns:
             List[Dict] - list of config objects from the json file
         """
+        self.log.debug(f"Opening {file} to read as json config")
         with open(file, 'r') as stream:
             try:
-                return json.load(stream)
+                read_data = json.load(stream)
             except json.JSONDecodeError as exc:
                 self.log.error(f"{file} is not a valid Json config file {str(exc)}")
-                return []
+                return list()
 
-    def _run_command(self, msg: ErrbotMessage, args: str) -> None:
+        self.log.debug(f"Read in {file} to {read_data}")
+        if type(read_data) != list:
+            self.log.error(f"{file} is not a valid config file. Please check the config examples. Your file should "
+                           f"contain a list of dictionaries")
+            return list()
+
+        return read_data
+
+    def _run_command(self, msg: ErrbotMessage, args: str) -> str:
         """
         Runs an executable with args from chatops and replies in a thread with the results of the execution
         Args:
             args (str): Args from chatops
             msg (ErrbotMessage): Errbot Message Object
 
+        Yields:
+            Str - messages to send to the user
         Returns:
-            None
+            Str - messages to send to the user
         """
-        # TODO: Make this a little more bulletproof
+        # TODO: PAss along env vars from config
         self.log.debug(f"Message coming in {msg}")
         msg_without_args = msg.body.replace(args, '')
         self.log.debug(f"Message stripped of args {msg_without_args}")
@@ -386,46 +419,33 @@ class ChatOpsAnything(BotPlugin):
         executable_config = self.EXECUTABLE_CONFIGS[command_name] if command_name in self.EXECUTABLE_CONFIGS else None
         if executable_config is None:
             self.log.error(f"{command_name} not in self.EXECUTABLE_CONFIGS")
-            self.send(msg.to,
-                      text=f"Unable to run your command {command_name}",
-                      in_reply_to=msg)
-            return
+            return f"Unable to run your command {command_name} because I am not able to find it in the plugins config."
 
         self.log.debug(f"Got config {executable_config}")
         try:
+            # delegator is awesome and does a bunch of shell escaping for us. Ty Kenneth
             command = delegator.run(f"{executable_config['bin_path']} {args}",
                                     block=False,
                                     timeout=executable_config['timeout'] if 'timeout' in executable_config else
                                     self.config['TIMEOUT'])
         except FileNotFoundError:
             self.log.error(f"Executable not found at {executable_config['bin_path']}")
-            self.send(msg.to,
-                      text=f"Error: Executable not found at {executable_config['bin_path']}",
-                      in_reply_to=msg)
-            return
+            return f"Error: Executable not found at {executable_config['bin_path']}"
         except OSError as error:
             self.log.error(f"Executable at {executable_config['bin_path']} threw an os error {error}")
-            self.send(msg.to,
-                      text=f"Error: Error received when running your command.\n{error}",
-                      in_reply_to=msg)
-            return
+            return f"Error: Error received when running your command.\n{error}"
 
         self.log.info(f"{executable_config['bin_path']} running with PID {command.pid}")
-        self.send(msg.to,
-                  text=f"Started your command with PID {command.pid}",
-                  in_reply_to=msg)
+
+        yield f"Started your command with PID {command.pid}"
         command.block()
 
-        self.send(msg.to,
-                  text=command.out,
-                  in_reply_to=msg)
-        self.send(msg.to,
-                  text=f"Command RC: {command.return_code}")
-        return
+        yield command.out()
+        yield f"Command RC: {command.return_code}"
 
     def _get_help(self, executable: Path) -> str:
         """
-        Returns the help text for executable, either set by config or by running the executable with -h
+        Returns the help text for executable, either set by config or by running the executable with --help
         Args:
             executable (Path): pathlib.Path object pointing to an executable file
 
@@ -433,7 +453,7 @@ class ChatOpsAnything(BotPlugin):
             str: help text
         """
         try:
-            command = delegator.run(f"{executable} -h",
+            command = delegator.run(f"{executable} --help",
                                     block=False,
                                     timeout=self.config['TIMEOUT'])
         except FileNotFoundError:
@@ -446,7 +466,7 @@ class ChatOpsAnything(BotPlugin):
         command.block()
         return command.out
 
-    def _validate_path(self, path: str, writeable: bool = False) -> None:
+    def _validate_path(self, path: str, writeable: bool = False) -> bool:
         """
         Validates the passed in path by checking out a couple of things. We're looking for a basic directory that we can
         read from. If writeable is true, we test if we can write to it.
@@ -455,13 +475,14 @@ class ChatOpsAnything(BotPlugin):
             writeable (bool): If true, check if the path is writeable. Defaults to false
 
         Returns:
-            None
+            True if path is valid
 
         Raises:
             errbot.ValidationException when path does not match our validation conditions
         """
         # use python3 pathlib because its great
         test_path = Path(path)
+        self.log.debug(f"Validating {test_path}")
         # test if path exists
         if not test_path.exists():
             raise ValidationException(f"{path} does not exist on the filesystem")
@@ -483,19 +504,17 @@ class ChatOpsAnything(BotPlugin):
         # try an iterdir() to check we have permissions to read from the directory
         try:
             test_path.iterdir().__next__()
+        except StopIteration as stoperror:
+            # an empty dir doesnt mean we cant read from it
+            pass
         except PermissionError as error:
             self.log.exception(str(error))
             raise ValidationException(f"Unable to read from {path}. Make sure the user errbot is running as has "
                                       f"permissions to read from this directory")
         if writeable:
-            # writeperms is write for user, write for group or  write for other
-            writeperms = stat.S_IWUSR | stat.S_IWGRP | stat.S_IXWOTH
-            st = os.state(path)
-            mode = st.st_mode
-            if not mode & writeperms:
-                raise ValidationException(f"{path} is not writeable. Make sure the user errbot is running as has "
-                                          f"permissions to write to this directory")
-        return
+            if not os.access(test_path, os.W_OK):
+                raise ValidationException(f"{path} is not writeable")
+        return True
 
     @staticmethod
     def _get_all_execs_in_path(path: str) -> Iterable[Path]:
@@ -535,7 +554,7 @@ class ChatOpsAnything(BotPlugin):
             Iterable of conf files
         """
         # these are the extensions that we consider valid conf files
-        conf_extensions = ['*.ini', '*.yaml', '*.yml', '*.json']
+        conf_extensions = ['*.yaml', '*.yml', '*.json']
         # chain all the globs into an iterable. this is done lazily so each glob is done as the iterator hits it
         return itertools.chain.from_iterable(glob.iglob(os.path.join(path, extension)) for extension in conf_extensions)
 
