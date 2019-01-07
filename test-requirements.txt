@@ -1,3 +1,4 @@
+errbot
 pytest
-pytest-env
-responses
+pytest-mock
+pytest-pep8
