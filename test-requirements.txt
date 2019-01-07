@@ -2,3 +2,4 @@ errbot
 pytest
 pytest-mock
 pytest-pep8
+responses
