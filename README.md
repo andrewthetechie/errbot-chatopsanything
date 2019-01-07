@@ -1,4 +1,8 @@
 # errbot-chatopsanything
+
+[![Build Status](https://travis-ci.org/andrewthetechie/errbot-chatopsanything.svg?branch=master)](https://travis-ci.org/andrewthetechie/errbot-chatopsanything)
+
+
 An Errbot Plugin to make any directory of executables chatops enabled. It passes along arguments directly to your
 executable and captures the executables output and return code and returns that to the user via Chat!
 
