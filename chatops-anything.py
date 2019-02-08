@@ -81,10 +81,8 @@ class ChatOpsAnything(BotPlugin):
                 exec_configs[command]['help'] = self._get_help(exec_configs[command]['bin_path'])
             # create a new command for the bot
             self.log.debug(f"Creating new command for {command}")
-            commands.append(Command(lambda plugin, msg, args: self._run_command(msg,
-                                                                                args),
-                            name=command,
-                            doc=exec_configs[command]['help']))
+            commands.append(Command(lambda plugin, msg, args: self.run_command(msg, args),
+                                    name=command, doc=exec_configs[command]['help']))
         # create a dynamic plugin for all of our executables
         self.create_dynamic_plugin(self.config['PLUGIN_NAME'], tuple(commands))
 
@@ -398,7 +396,7 @@ class ChatOpsAnything(BotPlugin):
 
         return read_data
 
-    def _run_command(self, msg: ErrbotMessage, args: str) -> str:
+    def run_command(self, msg: ErrbotMessage, args: str) -> str:
         """
         Runs an executable with args from chatops and replies in a thread with the results of the execution
         Args:
@@ -410,7 +408,6 @@ class ChatOpsAnything(BotPlugin):
         Returns:
             Str - messages to send to the user
         """
-        # TODO: PAss along env vars from config
         self.log.debug(f"Message coming in {msg}")
         msg_without_args = msg.body.replace(args, '')
         self.log.debug(f"Message stripped of args {msg_without_args}")
@@ -427,7 +424,8 @@ class ChatOpsAnything(BotPlugin):
             command = delegator.run(f"{executable_config['bin_path']} {args}",
                                     block=False,
                                     timeout=executable_config['timeout'] if 'timeout' in executable_config else
-                                    self.config['TIMEOUT'])
+                                    self.config['TIMEOUT'],
+                                    env=executable_config['env_vars'] if 'env_vars' in executable_config else None)
         except FileNotFoundError:
             self.log.error(f"Executable not found at {executable_config['bin_path']}")
             return f"Error: Executable not found at {executable_config['bin_path']}"
@@ -437,11 +435,14 @@ class ChatOpsAnything(BotPlugin):
 
         self.log.info(f"{executable_config['bin_path']} running with PID {command.pid}")
 
-        yield f"Started your command with PID {command.pid}"
+        # argh, gotta use self.send rather than yielding here because of how we're calling this from a lambda to make
+        # it a bot cmd. This breaks people's "divert to thread" or "divert to dm" rules. Sorry.
+        self.send(msg.to, text=f"Started your command with PID {command.pid}", in_reply_to=msg)
         command.block()
 
-        yield command.out()
-        yield f"Command RC: {command.return_code}"
+        self.send(msg.to, text=command.out, in_reply_to=msg)
+        self.send(msg.to, text=f"Command RC: {command.return_code}", in_reply_to=msg)
+        return
 
     def _get_help(self, executable: Path) -> str:
         """
