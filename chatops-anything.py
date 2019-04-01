@@ -358,7 +358,7 @@ class ChatOpsAnything(BotPlugin):
         self.log.debug(f"Opening {file} to read as yaml config")
         with open(file, 'r') as stream:
             try:
-                read_data = yaml.load(stream)
+                read_data = yaml.safe_load(stream)
             except yaml.YAMLError as exc:
                 self.log.error(f"{file} is not a valid yaml config file {str(exc)}")
                 return list()
