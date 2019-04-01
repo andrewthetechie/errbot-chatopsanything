@@ -9,4 +9,4 @@ Description = This is a plugin that chatops enables a directory of exectables
 Version = 3
 
 [Errbot]
-min = 5.2.0
+min = 5.1.3
